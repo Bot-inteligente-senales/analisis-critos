@@ -648,6 +648,9 @@ def enviar_telegram(mensaje):
 CANAL_TELEGRAM = str(_secreto("TELEGRAM_CANAL_ID", "") or "").strip()
 CANAL_CONFIGURADO = bool(TOKEN_TELEGRAM and CANAL_TELEGRAM)
 UMBRAL_SENAL_FUERTE = 70
+# Misma dirección (p. ej. otra vez SELL) como máximo una vez cada 4 h; un cambio BUY↔SELL sí sale
+# enseguida (respetando el anti-spam de 15 min). Igual que V2_HORAS_ENTRE_REPETIDAS del motor v2.
+HORAS_REPETIR_MISMA_SENAL = 4
 
 
 def enviar_canal_telegram(mensaje):
@@ -990,6 +993,14 @@ def calcular_atr(precios, periodo=14):
 
 def calcular_probabilidad(confianza):
     return min(100, max(0, confianza * 2.5))
+
+
+def es_senal_repetida(tipo, ultimo_tipo, ultimo_ts, ahora, horas):
+    """True si `tipo` es la misma dirección que la última señal enviada y aún no pasan `horas` horas.
+    Sin señal previa (ultimo_tipo vacío) nunca es repetida. Función pura: no toca estado ni red."""
+    if not ultimo_tipo or tipo != ultimo_tipo:
+        return False
+    return (ahora - float(ultimo_ts or 0)) < horas * 3600
  # ══════════════════ PARTE 6/11: análisis avanzado y aprendizaje ══════════════════
 
 def analisis_avanzado(simbolo, precio, valor_miedo_codicia):
@@ -3257,7 +3268,7 @@ def enviar_senal_telegram(simbolo, tipo, precio, razon, confianza, volumen_oncha
         texto_volumen = f"{volumen_onchain:.2f}B USD" if volumen_onchain is not None else "N/A"
         emoji_tipo = "🟢" if tipo == "BUY" else "🔴" if tipo == "SELL" else "⚪"
         msg = (f"📢 SEÑAL {emoji_tipo} {tipo} — {simbolo}\n"
-               f"🎯 Probabilidad: {probabilidad:.1f}%\n"
+               f"🎯 Fuerza de la señal: {probabilidad:.1f}% (puntaje del análisis, no es probabilidad de acierto)\n"
                f"💰 Precio: ${precio:,.0f} MXN\n"
                f"📝 Razón: {razon}\n"
                f"📊 Volumen 24h: {texto_volumen}\n"
@@ -3302,10 +3313,10 @@ _modo_aprend_previo = st.session_state.get("modo_aprendizaje", False)
 st.session_state.modo_aprendizaje = st.sidebar.checkbox(
     "✅ Modo aprendizaje activado", value=_modo_aprend_previo)
 
-st.sidebar.header("🎯 Probabilidad mínima")
+st.sidebar.header("🎯 Fuerza mínima de la señal")
 _val_umbral = min(95, max(50, int(st.session_state.get("confianza_umbral", 65))))
 st.session_state.confianza_umbral = st.sidebar.slider(
-    "Probabilidad mínima para operar (%)",
+    "Fuerza mínima de la señal para operar (%)",
     min_value=50, max_value=95, value=_val_umbral, step=5,
     help="50% = señales débiles | 65% = equilibrio | 80%+ = solo señales muy fuertes"
 )
@@ -3597,10 +3608,15 @@ def ejecutar_ciclo(interfaz):
         if senal_actual != "HOLD" and prob_actual >= UMBRAL_SENAL_FUERTE:
             clave_senal = f"ultima_senal_enviada_{sim_actual}"
             ultima = st.session_state.get(clave_senal, 0)
-            
-            # 🛡️ Anti-spam: 180 ciclos (15 minutos) para no saturar el canal
-            if st.session_state.ciclo - ultima > 180:
-                
+            ultimo_tipo = st.session_state.get(f"ultima_senal_tipo_{sim_actual}", "")
+            ultimo_ts = st.session_state.get(f"ultima_senal_ts_{sim_actual}", 0.0)
+
+            # 🛡️ Anti-spam: 180 ciclos (15 minutos) para no saturar el canal, y la misma dirección
+            # (p. ej. otra vez SELL mientras el mercado sigue cayendo) no se repite antes de 4 h
+            if (st.session_state.ciclo - ultima > 180
+                    and not es_senal_repetida(senal_actual, ultimo_tipo, ultimo_ts, time.time(),
+                                              HORAS_REPETIR_MISMA_SENAL)):
+
                 datos_t30 = st.session_state.tendencia_historica.get(sim_actual, {}) or {}
                 cambio_t30 = datos_t30.get("cambio_porcentual", 0)
                 tendencia_t30 = datos_t30.get("tendencia", "N/A")
@@ -3656,6 +3672,8 @@ def ejecutar_ciclo(interfaz):
                     cambio_t30, tendencia_t30, opinion_txt
                 ):
                     st.session_state[clave_senal] = st.session_state.ciclo
+                    st.session_state[f"ultima_senal_tipo_{sim_actual}"] = senal_actual
+                    st.session_state[f"ultima_senal_ts_{sim_actual}"] = time.time()
                     avisar(f"📢 Señal {senal_actual} {sim_actual} → canal", "info")
                     # 🧪 Registro para medir después si acertó
                     registrar_senal(sim_actual, senal_actual, precio_actual, prob_actual,
@@ -3728,7 +3746,7 @@ def ejecutar_ciclo(interfaz):
         "Cambio": [f"{cambio_btc:+.2f}%", f"{cambio_eth:+.2f}%"],
         "Tendencia": [st.session_state.tendencia["BTC"], st.session_state.tendencia["ETH"]],
         "Señal": [senal_btc, senal_eth],
-        "Prob. de acierto": [f"{probabilidad_btc:.1f}%", f"{probabilidad_eth:.1f}%"],
+        "Fuerza de la señal": [f"{probabilidad_btc:.1f}%", f"{probabilidad_eth:.1f}%"],
         "Umbral canal": [f"{UMBRAL_SENAL_FUERTE}%", f"{UMBRAL_SENAL_FUERTE}%"],
         "Volumen 24h": [
             f"{volumen_onchain_btc:.2f}B" if volumen_onchain_btc is not None else "N/A",
@@ -3979,7 +3997,7 @@ def _construir_datos_centro():
             "c": "buy" if compra else "sell",
             "h": str(r.get("fecha", ""))[11:19],
             "t": f"Señal {'COMPRA' if compra else 'VENTA'} {r.get('simbolo', '?')} "
-                 f"{round(float(r.get('probabilidad', 0) or 0))}%{motor} · $"
+                 f"fuerza {round(float(r.get('probabilidad', 0) or 0))}%{motor} · $"
                  f"{float(r.get('precio', 0) or 0):,.0f}",
         })
     serie, marcas = None, []

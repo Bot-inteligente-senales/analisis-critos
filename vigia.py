@@ -178,7 +178,7 @@ class Vigia:
         if recientes:
             u = recientes[-1]
             ultima = {"simbolo": u.get("simbolo"), "tipo": u.get("tipo"), "motor": u.get("motor", "actual"),
-                      "probabilidad": u.get("probabilidad"),
+                      "fuerza_senal": u.get("probabilidad"),   # puntaje del análisis, no una probabilidad de acierto
                       "hace_min": round((ahora - float(u.get("ts", 0) or 0)) / 60, 1)}
         return {"horas": horas, "total": len(recientes), "por_motor": por_motor,
                 "por_tipo": por_tipo, "ultima": ultima}
@@ -338,7 +338,7 @@ class Vigia:
             if s["total"]:
                 t += " (" + ", ".join(f"{k} {n}" for k, n in sorted(s["por_motor"].items())) + ")"
                 u = s["ultima"]
-                t += f" · última: {u['simbolo']} {u['tipo']} {u['probabilidad']}% hace {_hace(u['hace_min'])}"
+                t += f" · última: {u['simbolo']} {u['tipo']} fuerza {u['fuerza_senal']}% hace {_hace(u['hace_min'])}"
             out.append(t)
         d = datos.get("dca", {})
         if "error" in d:

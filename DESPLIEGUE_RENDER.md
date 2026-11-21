@@ -53,7 +53,7 @@ dinero). Lo arma el código, sin IA; no incluye saldos, llaves, posiciones ni op
   es válido, no publica y se queda en vista previa.
 - `CANAL_RESUMEN_HORA` (0-23, por defecto 20): hora de CDMX a partir de la cual sale.
 - **No es `TELEGRAM_CANAL_ID`.** Esa variable existe desde antes y hace que cada señal se mande a ese
-  canal EN LUGAR de a tu chat privado (con el formato actual, que dice "Probabilidad" y no trae aviso
+  canal EN LUGAR de a tu chat privado (con el formato actual, que dice "Fuerza de la señal" y no trae aviso
   legal). Para el resumen usa solo `CANAL_RESUMEN_ID`.
 - En Firebase solo escribe en su propia ruta `resumen_publico` (para no repetir el mensaje del día);
   el bot no la lee. Si Render reinicia el servicio, el mensaje de ese día puede repetirse una vez.

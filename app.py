@@ -1941,6 +1941,7 @@ HORIZONTES_HORAS = (1, 4, 24)
 SEGUNDOS_ENTRE_EVALUACIONES = 60
 SEGUNDOS_CACHE_ESTADISTICAS = 300
 MUESTRA_MINIMA_CONFIABLE = 30
+MAX_REGISTROS_SENALES = 3000   # señales más recientes que el panel lee de Firebase (estadísticas y Centro de mando)
 # Las señales que la segunda IA bloquea también se guardan y se miden, pero en su propia ruta
 # (senales_bloqueadas/) para que no se mezclen con las cifras de las enviadas. Sirven para ver
 # después si el bloqueo tuvo razón. Solo se guarda una por moneda y dirección cada 15 minutos
@@ -2120,7 +2121,7 @@ def evaluar_senales_pendientes(precios):
             print(f"Error evaluando una señal: {type(e).__name__}")
 
 
-def _leer_registros_senales(maximo=1000):
+def _leer_registros_senales(maximo=MAX_REGISTROS_SENALES):
     """Últimas señales registradas (con caché de 5 min). None si nunca se pudo leer."""
     cache = st.session_state.get("senales_stats_cache")
     ahora = time.time()
@@ -2971,7 +2972,9 @@ def _render_resultados_senales(interfaz):
         cont.caption("Aún no hay señales registradas. Aparecerán aquí cuando el bot envíe la primera.")
         return
     filas, total, sin_resultados = calcular_estadisticas_senales(registros)
-    cont.caption(f"{total} señales registradas · {sin_resultados} todavía esperan su primer resultado (1 h).")
+    ventana = (f" (las últimas {MAX_REGISTROS_SENALES}; las más viejas ya no entran en estas cifras)"
+               if total >= MAX_REGISTROS_SENALES else "")
+    cont.caption(f"{total} señales registradas{ventana} · {sin_resultados} todavía esperan su primer resultado (1 h).")
     if filas:
         cont.table(filas)
     try:

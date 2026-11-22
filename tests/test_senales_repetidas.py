@@ -1,4 +1,4 @@
-"""Señales repetidas y etiqueta «Fuerza de la señal».
+"""Señales repetidas, etiqueta «Fuerza de la señal» y ventana de lectura del registro.
 
 Importar app.py ejecuta el panel, así que se extraen sus funciones mediante AST (igual que
 test_firebase_protections.py). vigia.py sí se puede importar: no depende de Streamlit.
@@ -95,6 +95,35 @@ class EtiquetaFuerzaTests(unittest.TestCase):
         texto = vigia.Vigia.formatear_hechos(datos, "2026-11-20")
         self.assertIn("BTC SELL fuerza 100.0%", texto)
         self.assertNotIn("probabilidad", texto.lower())
+
+
+class VentanaDeLecturaTests(unittest.TestCase):
+    """El panel lee las últimas MAX_REGISTROS_SENALES señales (antes eran 1000 fijas)."""
+
+    def _leer(self, **kw):
+        from types import SimpleNamespace
+        respuesta = Mock(status_code=200)
+        respuesta.json.return_value = {"-a": {"ts": 1}, "-b": {"ts": 2}}
+        requests = SimpleNamespace(get=Mock(return_value=respuesta))
+        ctx = cargar_funciones(
+            "app.py", {"_leer_registros_senales"},
+            {"st": SimpleNamespace(session_state={}), "time": __import__("time"), "requests": requests,
+             "_url_registro": lambda ruta: f"https://fb/{ruta}.json", "SEGUNDOS_CACHE_ESTADISTICAS": 300,
+             "MAX_REGISTROS_SENALES": constante("app.py", "MAX_REGISTROS_SENALES")})
+        return ctx["_leer_registros_senales"](**kw), requests.get
+
+    def test_la_ventana_ya_no_es_de_1000(self):
+        self.assertGreater(constante("app.py", "MAX_REGISTROS_SENALES"), 1000)
+
+    def test_pide_a_firebase_la_ventana_completa(self):
+        registros, get = self._leer()
+        self.assertEqual(len(registros), 2)
+        self.assertEqual(get.call_args.kwargs["params"]["limitToLast"],
+                         constante("app.py", "MAX_REGISTROS_SENALES"))
+
+    def test_se_puede_pedir_otra_ventana(self):
+        _, get = self._leer(maximo=50)
+        self.assertEqual(get.call_args.kwargs["params"]["limitToLast"], 50)
 
 
 if __name__ == "__main__":

@@ -126,5 +126,85 @@ class VentanaDeLecturaTests(unittest.TestCase):
         self.assertEqual(get.call_args.kwargs["params"]["limitToLast"], 50)
 
 
+class QuitarSenalesRepetidasTests(unittest.TestCase):
+    """Las estadísticas cuentan una sola vez cada racha de señales iguales (misma regla de 4 h del bot)."""
+
+    T0 = 1_800_000_000.0
+
+    def setUp(self):
+        self.horas = constante("app.py", "HORAS_REPETIR_MISMA_SENAL")
+        ctx = cargar_funciones("app.py", {"es_senal_repetida", "quitar_senales_repetidas"},
+                               {"HORAS_REPETIR_MISMA_SENAL": self.horas})
+        self.f = ctx["quitar_senales_repetidas"]
+
+    def senal(self, minutos, tipo="SELL", simbolo="BTC", **extra):
+        return {"ts": self.T0 + minutos * 60, "tipo": tipo, "simbolo": simbolo, **extra}
+
+    def test_una_racha_de_24h_cada_15_min_queda_en_una_por_ventana(self):
+        racha = [self.senal(15 * i) for i in range(24 * 4)]          # 96 señales SELL en 24 h
+        distintas = self.f(racha)
+        self.assertEqual(len(distintas), 24 // self.horas)
+        pasos = [b["ts"] - a["ts"] for a, b in zip(distintas, distintas[1:])]
+        self.assertTrue(all(p >= self.horas * 3600 for p in pasos))
+
+    def test_el_cambio_de_direccion_se_conserva(self):
+        seq = [self.senal(0, "SELL"), self.senal(15, "SELL"), self.senal(30, "BUY"),
+               self.senal(45, "BUY"), self.senal(60, "SELL")]
+        self.assertEqual([r["tipo"] for r in self.f(seq)], ["SELL", "BUY", "SELL"])
+
+    def test_cada_moneda_va_por_su_lado(self):
+        seq = [self.senal(0, simbolo="BTC"), self.senal(1, simbolo="ETH"),
+               self.senal(15, simbolo="BTC"), self.senal(16, simbolo="ETH")]
+        self.assertEqual([r["simbolo"] for r in self.f(seq)], ["BTC", "ETH"])
+
+    def test_cada_motor_va_por_su_lado_y_sin_campo_motor_cuenta_como_actual(self):
+        seq = [self.senal(0), self.senal(5, motor="v2"), self.senal(10, motor="actual"), self.senal(15, motor="v2")]
+        distintas = self.f(seq)
+        self.assertEqual(len(distintas), 2)
+        self.assertEqual([r.get("motor") for r in distintas], [None, "v2"])
+
+    def test_separadas_por_la_ventana_o_mas_se_cuentan_todas(self):
+        seq = [self.senal(i * self.horas * 60) for i in range(5)]
+        self.assertEqual(len(self.f(seq)), 5)
+
+    def test_no_depende_del_orden_ni_modifica_la_lista(self):
+        seq = [self.senal(30), self.senal(0), self.senal(15)]
+        copia = list(seq)
+        self.assertEqual([r["ts"] for r in self.f(seq)], [self.T0])
+        self.assertEqual(seq, copia)
+
+    def test_un_registro_sin_tipo_no_se_pierde(self):
+        raro = {"ts": self.T0 + 5, "simbolo": "BTC"}
+        self.assertIn(raro, self.f([self.senal(0), raro]))
+
+    def test_lista_vacia(self):
+        self.assertEqual(self.f([]), [])
+
+    def test_las_estadisticas_dejan_de_contar_la_misma_racha_varias_veces(self):
+        ctx = cargar_funciones(
+            "app.py", {"es_senal_repetida", "quitar_senales_repetidas", "calcular_estadisticas_senales"},
+            {"HORAS_REPETIR_MISMA_SENAL": self.horas,
+             "HORIZONTES_HORAS": constante("app.py", "HORIZONTES_HORAS"),
+             "MUESTRA_MINIMA_CONFIABLE": constante("app.py", "MUESTRA_MINIMA_CONFIABLE")})
+        resultado = {"1h": {"acierto": True, "retorno_pct": 0.5}}
+        racha = [self.senal(15 * i, resultados=resultado, coinciden="SI") for i in range(16)]   # 4 h seguidas
+        crudo = ctx["calcular_estadisticas_senales"](racha)[0]
+        unico = ctx["calcular_estadisticas_senales"](ctx["quitar_senales_repetidas"](racha))[0]
+        self.assertEqual(crudo[0]["Evaluadas"], 16)
+        self.assertEqual(unico[0]["Evaluadas"], 1)
+        self.assertEqual(unico[0]["Aciertos"], 1)
+
+    def test_el_panel_el_centro_de_mando_y_el_resumen_usan_las_distintas(self):
+        app = (ROOT / "app.py").read_text(encoding="utf-8")
+        self.assertIn("calcular_estadisticas_senales(distintas)", app)
+        self.assertIn("simular_tp_sl(distintas, velas)", app)
+        self.assertIn('_par_acierto(distintas, "actual", "1h")', app)
+        self.assertIn('_par_acierto(distintas, "actual", "4h")', app)
+        resumen = (ROOT / "resumen_publico.py").read_text(encoding="utf-8")
+        self.assertIn("calcular_estadisticas_senales(app.quitar_senales_repetidas(senales))", resumen)
+        # el total de señales enviadas del día NO se toca: es lo que realmente salió por Telegram
+        self.assertIn("enviadas = [r for r in del_motor_actual if reciente(r)]", resumen)
+
+
 if __name__ == "__main__":
     unittest.main()

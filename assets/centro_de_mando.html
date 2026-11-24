@@ -540,7 +540,7 @@ h2 {
     <div class="panel sphere" id="esfera">
       <canvas id="cv-esfera" aria-label="Esfera animada de señales"></canvas>
       <div class="hud tl">MAPA DE SEÑALES<br>GIRO <b id="giro">000.0°</b> · EJE BLOQUEADO</div>
-      <div class="hud tr">NODOS <b id="h-nodos">0</b><br>EVALUADAS A 1 H <b id="h-eval">0</b></div>
+      <div class="hud tr">NODOS <b id="h-nodos">0</b><br>DISTINTAS A 1 H <b id="h-eval">0</b></div>
       <div class="cand" id="cand"></div>
     </div>
 
@@ -648,8 +648,8 @@ window.DATOS = /*DATOS*/null;
   $("h-nodos").textContent = X.senales;
   $("h-eval").textContent = X.a1[1];
   $("s-ciclos").textContent = X.worker ? "en el servidor" : "en este panel";
-  $("s-a1").textContent = X.a1[0] + " de " + X.a1[1];
-  $("s-a4").textContent = X.a4[0] + " de " + X.a4[1];
+  $("s-a1").textContent = X.a1[0] + " de " + X.a1[1] + " distintas";
+  $("s-a4").textContent = X.a4[0] + " de " + X.a4[1] + " distintas";
   var metas = [["k-ciclos", X.ciclos, 0, ""], ["k-sen", X.senales, 0, ""], ["k-a1", pct(X.a1), 1, "%"], ["k-a4", pct(X.a4), 1, "%"]];
   metas.forEach(function (m) {
     var el = $(m[0]), meta = m[1], dec = m[2], suf = m[3];

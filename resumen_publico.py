@@ -119,9 +119,9 @@ def construir_mensaje(app, senales, bloqueadas, ahora):
         lineas.append(f"· Bloqueadas por la segunda IA: {sum(1 for r in bloqueadas if reciente(r))}")
 
     pocas = False
-    filas, _, _ = app.calcular_estadisticas_senales(senales)
+    filas, _, _ = app.calcular_estadisticas_senales(app.quitar_senales_repetidas(senales))
     todas = {f["Plazo"]: f for f in filas if f["Grupo"] == "Todas"}
-    lineas += ["", f"Resultado observado de las señales enviadas (acumulado{_desde(del_motor_actual)})"]
+    lineas += ["", f"Resultado observado de las señales enviadas (acumulado{_desde(del_motor_actual)}; las repetidas cuentan una vez)"]
     if not todas:
         lineas.append("· Todavía no hay señales con resultado evaluado.")
     for clave in ("1h", "4h", "24h"):
@@ -133,7 +133,7 @@ def construir_mensaje(app, senales, bloqueadas, ahora):
         lineas.append(f"· A {_plazo(clave)}: {f['Evaluadas']} evaluadas, {f['Aciertos']} acertaron "
                       f"({_pct(f['% acierto'])}), retorno medio {_pct(f['Retorno medio'])}{marca}")
 
-    filas_b = app.calcular_estadisticas_bloqueadas(bloqueadas) if bloqueadas else []
+    filas_b = app.calcular_estadisticas_bloqueadas(app.quitar_senales_repetidas(bloqueadas)) if bloqueadas else []
     if filas_b:
         d_b = _desde(bloqueadas)
         lineas += ["", "Si se hubieran enviado las señales bloqueadas" + (f" (registradas{d_b})" if d_b else "")]

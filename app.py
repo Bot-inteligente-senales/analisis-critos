@@ -1001,6 +1001,28 @@ def es_senal_repetida(tipo, ultimo_tipo, ultimo_ts, ahora, horas):
     if not ultimo_tipo or tipo != ultimo_tipo:
         return False
     return (ahora - float(ultimo_ts or 0)) < horas * 3600
+
+
+def quitar_senales_repetidas(registros, horas=HORAS_REPETIR_MISMA_SENAL):
+    """Deja una sola señal por racha para las estadísticas: aplica hacia atrás la misma regla que hoy
+    sigue el bot (misma moneda, mismo motor y misma dirección dentro de `horas` horas no cuenta de
+    nuevo; un cambio de dirección o pasar las `horas` sí). Antes de esa regla el bot mandaba una señal
+    igual cada 15 min y cada una sumaba como si fuera independiente. No modifica la lista original."""
+    ultimas = {}
+    distintas = []
+    for r in sorted(registros, key=lambda x: float(x.get("ts", 0) or 0)):
+        tipo = r.get("tipo")
+        if not tipo:
+            distintas.append(r)
+            continue
+        ts = float(r.get("ts", 0) or 0)
+        clave = (r.get("simbolo"), r.get("motor", "actual") or "actual")
+        ultimo_tipo, ultimo_ts = ultimas.get(clave, ("", 0.0))
+        if es_senal_repetida(tipo, ultimo_tipo, ultimo_ts, ts, horas):
+            continue
+        ultimas[clave] = (tipo, ts)
+        distintas.append(r)
+    return distintas
  # ══════════════════ PARTE 6/11: análisis avanzado y aprendizaje ══════════════════
 
 def analisis_avanzado(simbolo, precio, valor_miedo_codicia):
@@ -2947,9 +2969,11 @@ def _render_bloqueadas(cont):
     if not bloqueadas:
         cont.caption("Todavía no hay señales bloqueadas con registro. Aparecerán aquí cuando la segunda IA bloquee una.")
         return
-    filas = calcular_estadisticas_bloqueadas(bloqueadas)
-    pendientes = sum(1 for r in bloqueadas if not r.get("resultados"))
-    cont.caption(f"{len(bloqueadas)} bloqueadas registradas · {pendientes} todavía esperan su primer resultado (1 h). "
+    distintas = quitar_senales_repetidas(bloqueadas)   # mismo criterio que las enviadas, para poder compararlas
+    filas = calcular_estadisticas_bloqueadas(distintas)
+    pendientes = sum(1 for r in distintas if not r.get("resultados"))
+    cont.caption(f"{len(bloqueadas)} bloqueadas registradas ({len(distintas)} distintas) · "
+                 f"{pendientes} todavía esperan su primer resultado (1 h). "
                  "No cuentan en las cifras de arriba y no cambian al bot.")
     if filas:
         cont.table(filas)
@@ -2971,19 +2995,26 @@ def _render_resultados_senales(interfaz):
     if not registros:
         cont.caption("Aún no hay señales registradas. Aparecerán aquí cuando el bot envíe la primera.")
         return
-    filas, total, sin_resultados = calcular_estadisticas_senales(registros)
+    distintas = quitar_senales_repetidas(registros)
+    filas, _, sin_resultados = calcular_estadisticas_senales(distintas)
     ventana = (f" (las últimas {MAX_REGISTROS_SENALES}; las más viejas ya no entran en estas cifras)"
-               if total >= MAX_REGISTROS_SENALES else "")
-    cont.caption(f"{total} señales registradas{ventana} · {sin_resultados} todavía esperan su primer resultado (1 h).")
+               if len(registros) >= MAX_REGISTROS_SENALES else "")
+    cont.caption(f"{len(registros)} señales registradas{ventana} → {len(distintas)} distintas. "
+                 f"Las repetidas (misma moneda y dirección dentro de {HORAS_REPETIR_MISMA_SENAL} h, como decide ahora el bot) "
+                 f"cuentan una sola vez en las cifras. {sin_resultados} todavía esperan su primer resultado (1 h).")
     if filas:
         cont.table(filas)
+    if len(distintas) < len(registros):
+        todas = cont.expander("Ver las cifras contando también las repetidas")
+        todas.table(calcular_estadisticas_senales(registros)[0])
+        todas.caption("Aquí una racha de señales iguales cuenta varias veces, por eso la muestra se ve más grande de lo que es.")
     try:
         _render_bloqueadas(cont)
     except Exception as e:
         print(f"Error mostrando las señales bloqueadas: {type(e).__name__}")
     try:
         velas = {sim: obtener_velas_horarias(sim) for sim in ("BTC", "ETH")}
-        resumen = simular_tp_sl(registros, velas)
+        resumen = simular_tp_sl(distintas, velas)
         if resumen:
             cont.markdown("**💰 Simulación con TP 5% / SL 1% y comisiones (solo compras, plazo 24 h)**")
             cont.table([{
@@ -2999,7 +3030,7 @@ def _render_resultados_senales(interfaz):
                 "Neto = resultado por operación después de comisiones (≈1.56% ida y vuelta, comisión taker de Bitso). "
                 "Si es negativo, el bot perdería dinero operando así. Usa cierres de 1 h de los últimos "
                 "14 días, por eso es aproximado y solo cuenta compras con 24 h ya cumplidas.")
-        filas_comb = comparar_combinaciones(registros, velas)
+        filas_comb = comparar_combinaciones(distintas, velas)
         if any(f["Todas: compras"] for f in filas_comb):
             cont.markdown("**🔬 Probando otras salidas (solo simulación, no cambia el bot)**")
             cont.table(filas_comb)
@@ -3013,7 +3044,7 @@ def _render_resultados_senales(interfaz):
         print(f"Error en el laboratorio de tendencia: {type(e).__name__}")
     try:
         velas_arbol = {sim: obtener_velas_horarias(sim) for sim in ("BTC", "ETH")}
-        _render_arbol(cont, registros, velas_arbol)
+        _render_arbol(cont, distintas, velas_arbol)
     except Exception as e:
         print(f"Error en el árbol de decisión: {type(e).__name__}")
     cont.caption(
@@ -3983,6 +4014,7 @@ def _construir_datos_centro():
     worker_vivo = bool(latido and (ahora - float(latido.get("ts", 0) or 0)) < SEGUNDOS_LATIDO_WORKER)
     ordenadas = sorted(registros, key=lambda r: float(r.get("ts", 0) or 0))
     actuales = [r for r in ordenadas if (r.get("motor", "actual") or "actual") == "actual"]
+    distintas = quitar_senales_repetidas(registros)   # el acierto cuenta una vez por racha; "senales" sigue siendo el total
     ultima = None
     if ordenadas:
         u = ordenadas[-1]
@@ -4024,9 +4056,9 @@ def _construir_datos_centro():
     return {
         "ciclos": int((latido or {}).get("ciclo", 0) or st.session_state.get("ciclo", 0) or 0),
         "senales": len(actuales) + sum(1 for r in ordenadas if r.get("motor") == "v2"),
-        "a1": _par_acierto(registros, "actual", "1h"),
-        "a4": _par_acierto(registros, "actual", "4h"),
-        "v2": _par_acierto(registros, "v2", "4h"),
+        "a1": _par_acierto(distintas, "actual", "1h"),
+        "a4": _par_acierto(distintas, "actual", "4h"),
+        "v2": _par_acierto(distintas, "v2", "4h"),
         "worker": worker_vivo,
         "modo": "OPERACIÓN REAL" if (MODO_REAL and OPERAR_AUTOMATICO) else "SOLO SEÑALES",
         "auto": auto,

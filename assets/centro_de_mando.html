@@ -746,7 +746,7 @@ window.DATOS = /*DATOS*/null;
     $("t-precio").textContent = "BTC / MXN · señales sobre el precio (ejemplo)";
   } else {
     marcas = X.marcas || [];
-    $("leyenda").innerHTML = "<span><i style=\"background:var(--green)\"></i>compra</span><span><i style=\"background:var(--red)\"></i>venta</span><span>señales de BTC registradas (ventana de 4 días)</span>";
+    $("leyenda").innerHTML = "<span><i style=\"background:var(--green)\"></i>compra</span><span><i style=\"background:var(--red)\"></i>venta</span><span>señales de BTC, una por racha (ventana de 4 días)</span>";
     $("t-precio").textContent = "BTC / MXN · cierres de 1 h";
   }
   var cvP = $("cv-precio"), gP = cvP.getContext("2d"), dimP = fit(cvP);

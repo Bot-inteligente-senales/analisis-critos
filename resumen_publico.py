@@ -91,9 +91,9 @@ def _leer(app, ruta, **params):
 def leer_registros(app):
     """(señales enviadas, señales bloqueadas). Las bloqueadas son None si no se pudieron leer, para
     no decir '0 bloqueadas' cuando en realidad no se supo."""
-    senales = _lista(_leer(app, "senales", orderBy='"$key"', limitToLast=1000))
+    senales = _lista(_leer(app, "senales", orderBy='"$key"', limitToLast=app.MAX_REGISTROS_SENALES))
     try:
-        bloqueadas = _lista(_leer(app, app.RUTA_BLOQUEADAS, orderBy='"$key"', limitToLast=500))
+        bloqueadas = _lista(_leer(app, app.RUTA_BLOQUEADAS, orderBy='"$key"', limitToLast=app.MAX_REGISTROS_BLOQUEADAS))
     except Exception as e:
         print(f"Resumen público: no pude leer las bloqueadas ({type(e).__name__}); salen sin esa parte.")
         bloqueadas = None

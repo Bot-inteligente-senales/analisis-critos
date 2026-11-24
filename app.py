@@ -1964,6 +1964,7 @@ SEGUNDOS_ENTRE_EVALUACIONES = 60
 SEGUNDOS_CACHE_ESTADISTICAS = 300
 MUESTRA_MINIMA_CONFIABLE = 30
 MAX_REGISTROS_SENALES = 3000   # señales más recientes que el panel lee de Firebase (estadísticas y Centro de mando)
+MAX_REGISTROS_BLOQUEADAS = 1500   # bloqueadas más recientes que el panel lee (antes 500; con las repetidas fuera quedaban solo ~75 distintas)
 # Las señales que la segunda IA bloquea también se guardan y se miden, pero en su propia ruta
 # (senales_bloqueadas/) para que no se mezclen con las cifras de las enviadas. Sirven para ver
 # después si el bloqueo tuvo razón. Solo se guarda una por moneda y dirección cada 15 minutos
@@ -2207,7 +2208,7 @@ def calcular_estadisticas_senales(registros):
     return filas, len(registros), sin_resultados
 
 
-def _leer_registros_bloqueadas(maximo=500):
+def _leer_registros_bloqueadas(maximo=MAX_REGISTROS_BLOQUEADAS):
     """Últimas señales bloqueadas por la segunda IA (caché de 5 min). [] si no hay o no se pudo leer."""
     cache = st.session_state.get("bloqueadas_stats_cache")
     ahora = time.time()
@@ -2806,8 +2807,9 @@ def _render_dca_vivo(cont):
         "Invertido": f"${res[m]['invertido']:,.0f}", "Valdría hoy": f"${res[m]['valor']:,.0f}",
         "Resultado": f"{res[m]['pct']:+.1f}%",
     } for m in ("BTC", "ETH")])
-    cont.caption("Cuenta simulada con la comisión taker de Bitso en cada compra y en la venta. "
-                 "Al principio el resultado es negativo solo por las comisiones: se necesitan meses.")
+    cont.caption("Cuenta simulada con la comisión taker de Bitso en cada compra y en la venta (≈1.56 % ida y vuelta). "
+                 "El resultado mezcla esas comisiones con lo que haya hecho el precio desde la primera compra, "
+                 "así que con pocas semanas dice muy poco: se necesitan meses.")
 
 
 def _render_laboratorio_tendencia(cont):
@@ -2972,7 +2974,9 @@ def _render_bloqueadas(cont):
     distintas = quitar_senales_repetidas(bloqueadas)   # mismo criterio que las enviadas, para poder compararlas
     filas = calcular_estadisticas_bloqueadas(distintas)
     pendientes = sum(1 for r in distintas if not r.get("resultados"))
-    cont.caption(f"{len(bloqueadas)} bloqueadas registradas ({len(distintas)} distintas) · "
+    ventana = (f" (las últimas {MAX_REGISTROS_BLOQUEADAS}; las más viejas ya no entran en estas cifras)"
+               if len(bloqueadas) >= MAX_REGISTROS_BLOQUEADAS else "")
+    cont.caption(f"{len(bloqueadas)} bloqueadas registradas{ventana} ({len(distintas)} distintas) · "
                  f"{pendientes} todavía esperan su primer resultado (1 h). "
                  "No cuentan en las cifras de arriba y no cambian al bot.")
     if filas:
@@ -4004,6 +4008,20 @@ def _par_acierto(registros, motor, clave):
     return [aciertos, n]
 
 
+def _marcas_grafica(distintas, largo_serie, ahora, simbolo="BTC"):
+    """[[posición, "buy"|"sell"]] de las señales de `simbolo` sobre la gráfica de cierres de 1 h (la última
+    vela es «ahora»). Recibe las señales ya sin repetidas, así que sale una marca por racha."""
+    marcas = []
+    for r in distintas:
+        if r.get("simbolo") != simbolo:
+            continue
+        horas = (ahora - float(r.get("ts", 0) or 0)) / 3600
+        idx = largo_serie - 1 - int(round(horas))
+        if 0 <= idx < largo_serie:
+            marcas.append([idx, "buy" if r.get("tipo") == "BUY" else "sell"])
+    return marcas
+
+
 def _construir_datos_centro():
     """Datos reales para el Centro de mando, o None si no hay registro que mostrar."""
     registros = _leer_registros_senales() if FIREBASE_CONFIGURADO else None
@@ -4040,13 +4058,7 @@ def _construir_datos_centro():
         velas = obtener_velas_horarias("BTC")
         if velas and len(velas) >= 24:
             serie = [round(float(v), 2) for v in velas[-96:]]
-            for r in ordenadas:
-                if r.get("simbolo") != "BTC":
-                    continue
-                horas = (ahora - float(r.get("ts", 0) or 0)) / 3600
-                idx = len(serie) - 1 - int(round(horas))
-                if 0 <= idx < len(serie):
-                    marcas.append([idx, "buy" if r.get("tipo") == "BUY" else "sell"])
+            marcas = _marcas_grafica(distintas, len(serie), ahora)
     except Exception as e:
         print(f"Error preparando la serie del Centro de mando: {type(e).__name__}")
     auto = "APAGADA"

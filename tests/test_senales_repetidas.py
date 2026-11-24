@@ -206,5 +206,61 @@ class QuitarSenalesRepetidasTests(unittest.TestCase):
         self.assertIn("enviadas = [r for r in del_motor_actual if reciente(r)]", resumen)
 
 
+class AjustesDelPanelTests(unittest.TestCase):
+    """Tope de lectura de bloqueadas, marcas por racha en la gráfica y texto honesto de la compra periódica."""
+
+    T0 = 1_800_000_000.0
+
+    def test_el_tope_de_bloqueadas_subio_y_es_el_de_lectura_por_defecto(self):
+        from types import SimpleNamespace
+        tope = constante("app.py", "MAX_REGISTROS_BLOQUEADAS")
+        self.assertGreater(tope, 500)
+        respuesta = Mock(status_code=200)
+        respuesta.json.return_value = {"-a": {"ts": 1}}
+        requests = SimpleNamespace(get=Mock(return_value=respuesta))
+        ctx = cargar_funciones(
+            "app.py", {"_leer_registros_bloqueadas"},
+            {"st": SimpleNamespace(session_state={}), "time": __import__("time"), "requests": requests,
+             "_url_registro": lambda ruta: f"https://fb/{ruta}.json", "RUTA_BLOQUEADAS": "senales_bloqueadas",
+             "SEGUNDOS_CACHE_ESTADISTICAS": 300, "MAX_REGISTROS_BLOQUEADAS": tope})
+        self.assertEqual(ctx["_leer_registros_bloqueadas"](), [{"ts": 1}])
+        self.assertEqual(requests.get.call_args.kwargs["params"]["limitToLast"], tope)
+
+    def _marcas(self):
+        horas = constante("app.py", "HORAS_REPETIR_MISMA_SENAL")
+        ctx = cargar_funciones(
+            "app.py", {"es_senal_repetida", "quitar_senales_repetidas", "_marcas_grafica"},
+            {"HORAS_REPETIR_MISMA_SENAL": horas})
+        return ctx["quitar_senales_repetidas"], ctx["_marcas_grafica"]
+
+    def test_una_racha_se_dibuja_con_una_sola_marca(self):
+        quitar, marcar = self._marcas()
+        racha = [{"ts": self.T0 + 900 * i, "tipo": "SELL", "simbolo": "BTC"} for i in range(8)]   # 2 h seguidas
+        ahora = self.T0 + 24 * 3600
+        self.assertEqual(len(marcar(racha, 96, ahora)), 8)            # sin quitar repetidas: ocho triángulos
+        self.assertEqual(marcar(quitar(racha), 96, ahora), [[71, "sell"]])
+
+    def test_compra_venta_otra_moneda_y_fuera_de_ventana(self):
+        _, marcar = self._marcas()
+        ahora = self.T0 + 200 * 3600
+        senales = [
+            {"ts": ahora, "tipo": "BUY", "simbolo": "BTC"},                    # ahora mismo: última vela
+            {"ts": ahora - 10 * 3600, "tipo": "SELL", "simbolo": "BTC"},
+            {"ts": ahora - 5 * 3600, "tipo": "BUY", "simbolo": "ETH"},         # otra moneda: no va
+            {"ts": ahora - 100 * 3600, "tipo": "BUY", "simbolo": "BTC"},       # fuera de las 96 h: no va
+        ]
+        self.assertEqual(marcar(senales, 96, ahora), [[95, "buy"], [85, "sell"]])
+
+    def test_el_texto_de_la_compra_periodica_ya_no_culpa_solo_a_las_comisiones(self):
+        app = (ROOT / "app.py").read_text(encoding="utf-8")
+        self.assertNotIn("solo por las comisiones", app)
+        self.assertIn("lo que haya hecho el precio desde la primera compra", app)
+
+    def test_el_resumen_diario_lee_las_mismas_ventanas_que_el_panel(self):
+        resumen = (ROOT / "resumen_publico.py").read_text(encoding="utf-8")
+        self.assertIn("limitToLast=app.MAX_REGISTROS_SENALES", resumen)
+        self.assertIn("limitToLast=app.MAX_REGISTROS_BLOQUEADAS", resumen)
+
+
 if __name__ == "__main__":
     unittest.main()
